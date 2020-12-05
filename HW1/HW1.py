@@ -31,7 +31,7 @@ ANIMATION_DURATION=10   # Panda animation duration
 # [Function Usage] This function is used to implement the first function in the experimental requirements, that is, the content related to the title, there is a lens switch in the title part, and the related photos of Zhejiang University elements and personal photos are displayed. Information such as your student ID and name should be displayed in the title.
 # [Parameter] None
 # [Return value] Returns the `imag` which is the image on which text and picture are to be drawn in the next scene.
-# [Developer and date] Zhi DING 2020/11/29
+# [Developer and date] Anonymous
 # [Change Record] None
 def loadCredits():
     # Traverse all the files in the source folder and select all picture files with the suffix .jpg
@@ -81,7 +81,7 @@ def loadCredits():
 # [Parameter] video: The VideoWirter which is initialized by the function `cv2.VideoWriter`;
 #             img: It is the image on which text and picture are to be drawn.
 # [Return value] Returns the image on which text and picture are to be drawn, the image is used to create the opening transition animation in the next scene
-# [Developer and date] Zhi DING 2020/11/29
+# [Developer and date] Anonymous
 # [Change Record] None
 def drawPicture(video,img):
     # Add subtitle description file
@@ -146,7 +146,7 @@ def drawPicture(video,img):
 #             preImg: It is the image on which text and picture were to be drawn in the past function;
 #             name: It is the name of the video which is going to be read in.
 # [Return value] Returns the last frame of the video which is read in.
-# [Developer and date] Zhi DING 2020/11/29
+# [Developer and date] Anonymous
 # [Change Record] None
 def story(video,preImg,name):
     videoCapture = cv2.VideoCapture(path + name)
@@ -182,7 +182,7 @@ def story(video,preImg,name):
 # [Function Usage] This function will be called in the pandaAnimation function to load the canvas of the background image in the panda animation scene.
 # [Parameter] name:The name of the image to be loaded, marked with a relative path or an absolute path
 # [Return value] Return to the canvas with the background image loaded
-# [Developer and date] Zhi DING 2020/11/29
+# [Developer and date] Anonymous
 # [Change Record] None
 def getBackground(name):
     global speed
@@ -203,7 +203,7 @@ def getBackground(name):
 # [Function Usage] This function will be called in the pandaAnimation function to load the canvas of the other image in the panda animation scene.
 # [Parameter] name:The name of the image to be loaded, marked with a relative path or an absolute path
 # [Return value] Return to the canvas with the other image loaded
-# [Developer and date] Zhi DING 2020/11/29
+# [Developer and date] Anonymous
 # [Change Record] None
 def getImage(name):
     a=cv2.imread(r'{}'.format(name))
@@ -215,7 +215,7 @@ def getImage(name):
 # [Function Usage] This function is used to implement the last part of the experiment description, which is to design an ending animation by yourself. This program implements an animation of a panda walking on the ground, which is realized by the program instead of reading the existing animation.
 # [Parameter] preFrame:The canvas in the previous scene, used to implement scene transition in this function
 # [Return value] None
-# [Developer and date] Zhi DING 2020/11/29
+# [Developer and date] Anonymous
 # [Change Record] None
 def pandaAnimation(preFrame):
     # Load each picture information, initialize the canvas
