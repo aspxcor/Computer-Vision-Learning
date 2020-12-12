@@ -4,674 +4,427 @@
 #     2. Display the final test results on the original image;
 #     3. Show some key intermediate results separately
 #     4. Debugging results of three specified test images (coin, seal and highway) must be carried out. In addition, you can voluntarily add some test images
-# File Name: HW2_3170104656_DingZhi.py
-# Author: Zhi DING
-# Student ID: 3170104656
-# Last Modified: 2020/12/6
+# Last Modified: 2020/12/11
 
 import cv2
+import math
 import numpy as np
-import time
-from multiprocessing.dummy import Pool as ThreadPool
-from functools import partial
-# from multiprocessing import Pool
 
-RADIUSMAX = 130     #
+# Some global variables and basic hyperparameter information are defined here
+Path = "./source/"          # Path to save picture which is going to be detected
+Save_Path = "./Output/"     # Path to save picture which is after detected
+Guassian_kernal_size = 3    # Convolution kernel of GaussianBlur
+HT_high_threshold = 25      # high threshold of Canny
+HT_low_threshold = 6        # low threshold of Canny
+Hough_transform_step = 6    # Step in Hough Transform
+Hough_transform_threshold = 110 # threshold of Hough Transform
 
-def fill_acc_array(x0, y0, radius):
-    x = radius
-    y = 0
-    decision = 1 - x
+# [Class name] Canny
+# [Class Usage] This class is used to detect the edge of the image
+# [Class Interface]
+    # Get_gradient_img(self):Calculate the gradient map and gradient direction matrix and return the generated gradient map
+    # Non_maximum_suppression(self):Perform non-maximization suppression on the generated gradient map, combine the magnitude of the tan value with positive and negative, determine the direction of the gradient in the dispersion, and return the generated non-maximization suppression result map
+    # Hysteresis_thresholding(self):The hysteresis threshold method is applied to the generated non-maximization suppression result graph, the weak edge is extended with the strong edge, where the extension direction is the vertical direction of the gradient, and the point larger than the low threshold and smaller than the high threshold is set as the high threshold size, direction The determination at the discrete point is similar to the non-maximization suppression, and the result graph of the hysteresis threshold method is returned
+    # canny_algorithm(self):Call all the above member functions in order and steps and return Canny edge detection results
+# [Developer and date] Anonymous
+# [Change Record] None
+class Canny:
 
-    while (y < x):
-        if (x + x0 < height and y + y0 < width):
-            acc_array[x + x0, y + y0, radius] += 1;  # Octant 1
-        if (y + x0 < height and x + y0 < width):
-            acc_array[y + x0, x + y0, radius] += 1;  # Octant 2
-        if (-x + x0 < height and y + y0 < width):
-            acc_array[-x + x0, y + y0, radius] += 1;  # Octant 4
-        if (-y + x0 < height and x + y0 < width):
-            acc_array[-y + x0, x + y0, radius] += 1;  # Octant 3
-        if (-x + x0 < height and -y + y0 < width):
-            acc_array[-x + x0, -y + y0, radius] += 1;  # Octant 5
-        if (-y + x0 < height and -x + y0 < width):
-            acc_array[-y + x0, -x + y0, radius] += 1;  # Octant 6
-        if (x + x0 < height and -y + y0 < width):
-            acc_array[x + x0, -y + y0, radius] += 1;  # Octant 8
-        if (y + x0 < height and -x + y0 < width):
-            acc_array[y + x0, -x + y0, radius] += 1;  # Octant 7
-        y += 1
-        if (decision <= 0):
-            decision += 2 * y + 1
+    # [Function name] __init__
+    # [Function Usage] This function is used to Initialize the Canny class
+    # [Parameter]
+        # Guassian_kernal_size: Gaussian filter size
+        # img: input picture, changed during the algorithm
+        # HT_high_threshold: The high threshold in the hysteresis threshold method
+        # HT_low_threshold: The low threshold in the hysteresis threshold method
+    # [Return value] None
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def __init__(self, Guassian_kernal_size, img, HT_high_threshold, HT_low_threshold):
+        self.Guassian_kernal_size = Guassian_kernal_size
+        self.img = img
+        self.y, self.x = img.shape[0:2]
+        self.angle = np.zeros([self.y, self.x])
+        self.img_origin = None
+        self.x_kernal = np.array([[-1, 1]])
+        self.y_kernal = np.array([[-1], [1]])
+        self.HT_high_threshold = HT_high_threshold
+        self.HT_low_threshold = HT_low_threshold
+
+    # [Function name] Get_gradient_img
+    # [Function Usage] This function is used to Calculate gradient map and gradient direction matrix
+    # [Parameter] None
+    # [Return value] Return the Generated gradient map
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def Get_gradient_img(self):
+        print('Get_gradient_img')
+        # Initializes the correlation matrix used to calculate the gradient
+        new_img_x = np.zeros([self.y, self.x], dtype=np.float)
+        new_img_y = np.zeros([self.y, self.x], dtype=np.float)
+        # Scan the image circularly to calculate the gradient, and record the relevant data into the gradient matrix
+        for i in range(0, self.x):
+            for j in range(0, self.y):
+                if j == 0:
+                    new_img_y[j][i] = 1
+                else:
+                    new_img_y[j][i] = np.sum(np.array([[self.img[j - 1][i]], [self.img[j][i]]]) * self.y_kernal)
+                if i == 0:
+                    new_img_x[j][i] = 1
+                else:
+                    new_img_x[j][i] = np.sum(np.array([self.img[j][i - 1], self.img[j][i]]) * self.x_kernal)
+        # Return amplitude and phase
+        gradient_img, self.angle = cv2.cartToPolar(new_img_x, new_img_y)
+        self.angle = np.tan(self.angle)
+        self.img = gradient_img.astype(np.uint8)
+        return self.img
+
+    # [Function name] Non_maximum_suppression
+    # [Function Usage] This function is used to Perform non-maximization suppression on the generated gradient map, and combine the tan value with positive and negative to determine the direction of the gradient in the dispersion
+    # [Parameter] None
+    # [Return value] Return the resulting graph of non-maximization suppression results
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def Non_maximum_suppression(self):
+        print('Non_maximum_suppression')
+        # Initialize the matrix related to non-maximum suppression
+        result = np.zeros([self.y, self.x])
+        for i in range(1, self.y - 1):
+            for j in range(1, self.x - 1):
+                # Perform non-maximum suppression in different scenarios
+                if abs(self.img[i][j]) <= 4:
+                    result[i][j] = 0
+                    continue
+                elif abs(self.angle[i][j]) > 1:
+                    gradient2 = self.img[i - 1][j]
+                    gradient4 = self.img[i + 1][j]
+                    if self.angle[i][j] > 0:
+                        gradient1 = self.img[i - 1][j - 1]
+                        gradient3 = self.img[i + 1][j + 1]
+                    else:
+                        gradient1 = self.img[i - 1][j + 1]
+                        gradient3 = self.img[i + 1][j - 1]
+                else:
+                    gradient2 = self.img[i][j - 1]
+                    gradient4 = self.img[i][j + 1]
+                    if self.angle[i][j] > 0:
+                        gradient1 = self.img[i - 1][j - 1]
+                        gradient3 = self.img[i + 1][j + 1]
+                    else:
+                        gradient3 = self.img[i - 1][j + 1]
+                        gradient1 = self.img[i + 1][j - 1]
+                # Process the image matrix according to the result of non-maximum suppression
+                temp1 = abs(self.angle[i][j]) * gradient1 + (1 - abs(self.angle[i][j])) * gradient2
+                temp2 = abs(self.angle[i][j]) * gradient3 + (1 - abs(self.angle[i][j])) * gradient4
+                if self.img[i][j] >= temp1 and self.img[i][j] >= temp2:
+                    result[i][j] = self.img[i][j]
+                else:
+                    result[i][j] = 0
+        self.img = result
+        return self.img
+
+    # [Function name] Hysteresis_thresholding
+    # [Function Usage] The hysteresis threshold method is applied to the generated non-maximization suppression result graph, and the weak edge is extended with the strong edge. The extension direction here is the vertical direction of the gradient. The determination at discrete points is similar to non-maximization suppression.
+    # [Parameter] None
+    # [Return value] Return the Hysteresis threshold method result graph
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def Hysteresis_thresholding(self):
+        print('Hysteresis_thresholding')
+        # Perform Hysteresis thresholding in different scenarios
+        for i in range(1, self.y - 1):
+            for j in range(1, self.x - 1):
+                if self.img[i][j] >= self.HT_high_threshold:
+                    if abs(self.angle[i][j]) < 1:
+                        if self.img_origin[i - 1][j] > self.HT_low_threshold:
+                            self.img[i - 1][j] = self.HT_high_threshold
+                        if self.img_origin[i + 1][j] > self.HT_low_threshold:
+                            self.img[i + 1][j] = self.HT_high_threshold
+                        if self.angle[i][j] < 0:
+                            if self.img_origin[i - 1][j - 1] > self.HT_low_threshold:
+                                self.img[i - 1][j - 1] = self.HT_high_threshold
+                            if self.img_origin[i + 1][j + 1] > self.HT_low_threshold:
+                                self.img[i + 1][j + 1] = self.HT_high_threshold
+                        else:
+                            if self.img_origin[i - 1][j + 1] > self.HT_low_threshold:
+                                self.img[i - 1][j + 1] = self.HT_high_threshold
+                            if self.img_origin[i + 1][j - 1] > self.HT_low_threshold:
+                                self.img[i + 1][j - 1] = self.HT_high_threshold
+                    else:
+                        if self.img_origin[i][j - 1] > self.HT_low_threshold:
+                            self.img[i][j - 1] = self.HT_high_threshold
+                        if self.img_origin[i][j + 1] > self.HT_low_threshold:
+                            self.img[i][j + 1] = self.HT_high_threshold
+                        if self.angle[i][j] < 0:
+                            if self.img_origin[i - 1][j - 1] > self.HT_low_threshold:
+                                self.img[i - 1][j - 1] = self.HT_high_threshold
+                            if self.img_origin[i + 1][j + 1] > self.HT_low_threshold:
+                                self.img[i + 1][j + 1] = self.HT_high_threshold
+                        else:
+                            if self.img_origin[i - 1][j + 1] > self.HT_low_threshold:
+                                self.img[i + 1][j - 1] = self.HT_high_threshold
+                            if self.img_origin[i + 1][j - 1] > self.HT_low_threshold:
+                                self.img[i + 1][j - 1] = self.HT_high_threshold
+        return self.img
+
+    # [Function name] canny_algorithm
+    # [Function Usage] This function is used to Call all the above member functions in order and steps
+    # [Parameter] None
+    # [Return value] Return the Results of Canny algorithm
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def canny_algorithm(self):
+        # Call all the above member functions in order and steps
+        self.img = cv2.GaussianBlur(self.img, (self.Guassian_kernal_size, self.Guassian_kernal_size), 0)
+        self.Get_gradient_img()
+        self.img_origin = self.img.copy()
+        self.Non_maximum_suppression()
+        self.Hysteresis_thresholding()
+        return self.img
+
+# [Class name] Hough_Circle_Transform
+# [Class Usage] This class is used to detect the circle in the image by using the Hough Transform Algorithm
+# [Class Interface]
+    # Hough_transform_algorithm(self):A three-dimensional space is established according to x, y, and radius, and all units in the space are voted along the gradient direction according to the points on the edge of the picture. The result of each point voted as a broken line and returned to the voting matrix
+    # Select_Circle(self):Select suitable circles from the voting matrix according to the threshold, and use the method of averaging the results of neighboring points to suppress non-maximization
+    # Calculate(self):Call the above member functions in the order of the algorithm and return the circle fitting result graph, the circle coordinates and radius set
+# [Developer and date] Anonymous
+# [Change Record] None
+class Hough_Circle_Transform:
+
+    # [Function name] __init__
+    # [Function Usage] This function is used to Initialize the Hough_Circle_Transform class
+    # [Parameter]
+        # img: input image
+        # angle: input gradient direction matrix
+        # step: Hough transform step size
+        # threshold: the threshold of the filter unit
+    # [Return value] None
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def __init__(self, img, angle, step=5, threshold=135):
+        self.img = img
+        self.angle = angle
+        self.y, self.x = img.shape[0:2]
+        self.radius = math.ceil(math.sqrt(self.y ** 2 + self.x ** 2))
+        self.step = step
+        self.vote_matrix = np.zeros(
+            [math.ceil(self.y / self.step), math.ceil(self.x / self.step), math.ceil(self.radius / self.step)])
+        self.threshold = threshold
+        self.circles = []
+
+    # [Function name] Hough_transform_algorithm
+    # [Function Usage] A three-dimensional space is established according to x, y, and radius, and all units in the space are voted along the gradient direction according to the points on the edge of the picture. Each point is cast and the result is a broken line.
+    # [Parameter] None
+    # [Return value] Return the voting matrix
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def Hough_transform_algorithm(self):
+        print('Hough_transform_algorithm')
+        # A three-dimensional space is established according to x, y, and radius
+        for i in range(1, self.y - 1):
+            for j in range(1, self.x - 1):
+                if self.img[i][j] > 0:
+                    y = i
+                    x = j
+                    r = 0
+                    while y < self.y and x < self.x and y >= 0 and x >= 0:
+                        self.vote_matrix[math.floor(y / self.step)][math.floor(x / self.step)][
+                            math.floor(r / self.step)] += 1
+                        y = y + self.step * self.angle[i][j]
+                        x = x + self.step
+                        r = r + math.sqrt((self.step * self.angle[i][j]) ** 2 + self.step ** 2)
+                    y = i - self.step * self.angle[i][j]
+                    x = j - self.step
+                    r = math.sqrt((self.step * self.angle[i][j]) ** 2 + self.step ** 2)
+                    while y < self.y and x < self.x and y >= 0 and x >= 0:
+                        self.vote_matrix[math.floor(y / self.step)][math.floor(x / self.step)][
+                            math.floor(r / self.step)] += 1
+                        y = y - self.step * self.angle[i][j]
+                        x = x - self.step
+                        r = r + math.sqrt((self.step * self.angle[i][j]) ** 2 + self.step ** 2)
+        return self.vote_matrix
+
+    # [Function name] Select_Circle
+    # [Function Usage] Select suitable circles from the voting matrix according to the threshold, and use the method of averaging the results of neighboring points to suppress non-maximization.
+    # [Parameter] None
+    # [Return value] None
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def Select_Circle(self):
+        print('Select_Circle')
+        circleCandidate = []        # Store candidate circle information
+        for i in range(0, math.ceil(self.y / self.step)):
+            for j in range(0, math.ceil(self.x / self.step)):
+                for r in range(0, math.ceil(self.radius / self.step)):
+                    if self.vote_matrix[i][j][r] >= self.threshold:
+                        y = i * self.step + self.step / 2
+                        x = j * self.step + self.step / 2
+                        r = r * self.step + self.step / 2
+                        circleCandidate.append((math.ceil(x), math.ceil(y), math.ceil(r)))
+        if len(circleCandidate) == 0:
+            print("No Circle in this threshold. No Circle Detected.")
+            return
+        # Check the candidate circles one by one and deal with them
+        x, y, r = circleCandidate[0]
+        possible = []
+        middle = []
+        for circle in circleCandidate:
+            if abs(x - circle[0]) <= 20 and abs(y - circle[1]) <= 20:
+                possible.append([circle[0], circle[1], circle[2]])
+            else:
+                result = np.array(possible).mean(axis=0)
+                middle.append((result[0], result[1], result[2]))
+                possible.clear()
+                x, y, r = circle
+                possible.append([x, y, r])
+        result = np.array(possible).mean(axis=0)
+        middle.append((result[0], result[1], result[2]))
+
+        def takeFirst(elem):
+            return elem[0]
+        # Output candidate circle information
+        middle.sort(key=takeFirst)
+        x, y, r = middle[0]
+        possible = []
+        for circle in middle:
+            if abs(x - circle[0]) <= 20 and abs(y - circle[1]) <= 20:
+                possible.append([circle[0], circle[1], circle[2]])
+            else:
+                result = np.array(possible).mean(axis=0)
+                print("Circle candidate core: (%f, %f) Radius: %f" % (result[0], result[1], result[2]))
+                self.circles.append((result[0], result[1], result[2]))
+                possible.clear()
+                x, y, r = circle
+                possible.append([x, y, r])
+        result = np.array(possible).mean(axis=0)
+        print("Circle candidate core: (%f, %f) Radius: %f" % (result[0], result[1], result[2]))
+        self.circles.append((result[0], result[1], result[2]))
+
+    # [Function name] Calculate
+    # [Function Usage] Call the above member functions in the order of the algorithm
+    # [Parameter] None
+    # [Return value] Return the Circle fitting result graph, circle coordinates and radius collection
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def Calculate(self):
+        self.Hough_transform_algorithm()
+        self.Select_Circle()
+        return self.circles
+
+# [Class name] Hough_Line_Transform
+# [Class Usage] This class is used to detect the line in the image
+# [Class Interface]
+    # voting(self):According to the relevant design of the Hough algorithm, the voting matrix is given for the subsequent determination of the straight line position
+    # non_maximum_suppression(self):Perform non-maximization suppression on the generated gradient map, and return the generated non-maximization suppression result map
+    # inverse_hough(self):According to the previously obtained matrix information and threshold, determine the line position and draw a graph with line detection information
+    # Calculate(self):Call all the above member functions in order and steps and return the detection results
+# [Developer and date] Anonymous
+# [Change Record] None
+class Hough_Line_Transform:
+
+    # [Function name] __init__
+    # [Function Usage] This function is used to Initialize the Hough_Line_Transform class
+    # [Parameter]
+        # img: input image(gray)
+        # imgOrigin: input image(RGB)
+    # [Return value] None
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def __init__(self, img, imgOrigin):
+        self.img = img
+        self.imgOrigin =imgOrigin
+        self.y, self.x = img.shape[0:2]
+        self.rho_max = np.ceil(np.sqrt(self.y ** 2 + self.x ** 2)).astype(np.int)    # get rho max length
+        self.vote_matrix = np.zeros((self.rho_max, 180), dtype=np.int)   # hough table
+        self.idx = np.where(self.img == 255)
+
+    # [Function name] voting
+    # [Function Usage] According to the relevant design of the Hough algorithm
+    # [Parameter] None
+    # [Return value] Return the voting matrix
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def voting(self):
+        print('voting')
+        for y, x in zip(self.idx[0], self.idx[1]):      # zip function returns tuple
+            for theta in range(180):
+                t = np.pi / 180 * theta     # get polar coordinat4s
+                rho = int(x * np.cos(t) + y * np.sin(t))
+                self.vote_matrix[rho, theta] += 1       # Vote
+        self.vote_matrix=self.vote_matrix.astype(np.uint8)
+        return self.vote_matrix.astype(np.uint8)
+
+    # [Function name] inverse_hough
+    # [Function Usage] According to the previously obtained matrix information and threshold, determine the line position and draw a graph with line detection information
+    # [Parameter] None
+    # [Return value] Return the graph with line detection information
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def inverse_hough(self):
+        print('inverse_hough')
+        rho_max, _ = self.vote_matrix.shape
+        out = self.imgOrigin.copy()
+        # get x, y index of hough table
+        # np.ravel Reduce the multidimensional array to 1 dimension
+        ind_x = np.array(np.where(self.vote_matrix.ravel()>Hough_transform_threshold))[0]
+        if ind_x.size>0:
+            print("Number of votes of Line", self.vote_matrix.ravel()[ind_x])
         else:
-            x = x - 1;
-            decision += 2 * (y - x) + 1
+            print("No Line in this threshold. No Line Detected.")
+        ind_y = ind_x.copy()
+        thetas = ind_x % 180
+        rhos = ind_y // 180
+        for theta, rho in zip(thetas, rhos):    # each theta and rho
+            t = np.pi / 180. * theta        # theta[radian] -> angle[degree]
+            for x in range(self.x):
+                if np.sin(t) != 0:
+                    pass
+                    y = - (np.cos(t) / np.sin(t)) * x + (rho) / np.sin(t)
+                    y = int(y)
+                    if y >= self.y or y < 0:
+                        continue
+                    out[y, x] = [0,255,255]
+            for y in range(self.y): # hough -> (x,y)
+                if np.cos(t) != 0:
+                    x = - (np.sin(t) / np.cos(t)) * y + (rho) / np.cos(t)
+                    x = int(x)
+                    if x >= self.x or x < 0:
+                        continue
+                    out[y, x] = [0,0,255]
+        return out.astype(np.uint8)
 
-def detectCircleLoop(edges,item):
-    x = edges[0][item]
-    y = edges[1][item]
-    for radius in range(20, 130):
-        fill_acc_array(x, y, radius)
-        print("in detectCircleLoop! i=", item, " len(edges[0])=", len(edges[0]), " radius=", radius)
+    # [Function name] Calculate
+    # [Function Usage] Call all the above member functions in order and steps and return the detection results
+    # [Parameter] None
+    # [Return value] the picture with line being detected.
+    # [Developer and date] Anonymous
+    # [Change Record] None
+    def Calculate(self):
+        self.voting()
+        out=self.inverse_hough()
+        return out
 
-# def detectCircleLoop(idx):
-#     x = edges[0][idx]
-#     y = edges[1][idx]
-#     for radius in range(20, 130):
-#         fill_acc_array(x, y, radius)
-#         print("in detectCircleLoop! i=", idx, " len(edges[0])=", len(edges[0]), " radius=", radius)
-
-def detectCircle():
-    filter3D = np.ones((30, 30, RADIUSMAX))
-    edges = np.where(edged_image == 255)
-    # pool = ThreadPool(8) # 池的大小为8
-    pool = ThreadPool(8)  # 池的大小为8
-    detectCircleLoopFunction=partial(detectCircleLoop,edges)
-    pool.map(detectCircleLoopFunction,range(0, len(edges[0])))
-
-    # pool.map(detectCircleLoop,range(0, len(edges[0])))
-
-    # map(detectCircleLoop,range(0, len(edges[0])))
-
-    # for i in range(0, len(edges[0])):
-    #     x = edges[0][i]
-    #     y = edges[1][i]
-    #     for radius in range(20, 130):
-    #         fill_acc_array(x, y, radius)
-    #         print("in detecting loop! i=", i, " len(edges[0])=", len(edges[0]), " radius=", radius)
-    # i = 0
-    # j = 0
-    # while (i < height - 30):
-    for i in range(0,height - 30,30):
-        # while (j < width - 30):
-        for j in range(0, width - 30, 30):
-            print("in detecting loop: i=", i, " height-30=", height - 30, " j=", j, " width-30=", width - 30)
-            filter3D = acc_array[i:i + 30, j:j + 30, :] * filter3D
-            max_pt = np.where(filter3D == filter3D.max())
-            a = max_pt[0]
-            b = max_pt[1]
-            c = max_pt[2]
-            b = b + j
-            a = a + i
-            print("a=", a)
-            print("b=", b)
-            print("c=", c)
-            if (filter3D.max() > 150):
-                # print("in if")
-                cv2.circle(output, (b[0], a[0]), c[0], (0, 255, 0), 2)
-            # j = j + 30
-            filter3D[:, :, :] = 1
-        # j = 0
-        # i = i + 30
-    cv2.imshow('Detected circle', output)
-
-if __name__ == "__main__":
-    original_image = cv2.imread('hw-coin.jpg')
-    output = original_image.copy()
-    #Gaussian Blurring of Gray Image
-    blur_image = cv2.GaussianBlur(original_image,(23,23),0)
-    #Using OpenCV Canny Edge detector to detect edges
-    edged_image = cv2.Canny(blur_image,75,150)
-    cv2.imshow('Original Image',original_image)
-    cv2.imshow('Gaussian Blurred Image',blur_image)
-    cv2.imshow('Edged Image', edged_image)
-    height,width = edged_image.shape
-    # radii = 130
-
-    acc_array = np.zeros(((height,width,RADIUSMAX)))
-    # edges = np.where(edged_image == 255)
-
-    start_time = time.time()
-
-    detectCircle()
-
-    end_time = time.time()
-    time_taken = end_time - start_time
-    print ('Time taken for execution',time_taken)
-
-
-
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-
-# import os
-# import cv2
-# import numpy as np
-#
-# img = cv2.imread("./source/hw-seal.jpg")
-# cv2.imshow("original_img", img)
-#
-# # canny(): 边缘检测
-# img1 = cv2.GaussianBlur(img,(3,3),0)
-# canny = cv2.Canny(img1, 50, 150)
-# cv2.imshow('Canny', canny)
-#
-#
-# # _,Thr_img = cv2.threshold(img,210,255,cv2.THRESH_BINARY)#设定红色通道阈值210（阈值影响梯度运算效果）
-# # kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(5,5))         #定义矩形结构元素
-# # gradient = cv2.morphologyEx(Thr_img, cv2.MORPH_GRADIENT, kernel) #梯度
-# # cv2.imshow("gradient", gradient)
-#
-# # cv2.imwrite("canny.jpg", cv2.Canny(img, 200, 300))
-# # cv2.imshow("canny", cv2.imread("canny.jpg"))
-#
-# cv2.waitKey()
-# cv2.destroyAllWindows()
-
-
-# import cv2
-# import numpy as np
-# import sys
-# from os.path import splitext
-#
-#
-# def crop(image, r, c, height, width):
-#     return image[r:r+height, c:c+width]
-#
-#
-# def moore_neighbor_tracing(image, accumulator, maxr):
-#     color = 100
-#     original_height, original_width = image.shape
-#     image = np.pad(image, ((1, 1), (1, 1)), 'constant', constant_values=(255, 255))
-#     height, width = image.shape
-#     contour_pixels = []
-#     p = (0, 0)
-#     c = (0, 0)
-#     s = (0, 0)
-#     previous = (0, 0)
-#     found = False
-#
-#     # Find the first point
-#     for i in range(height):
-#         for j in range(width):
-#             if image[i, j] <= color and not (i == 0 and j == 0):
-#                 s = (i, j)
-#                 # contour_pixels.append(s)
-#                 contour_pixels.append((s[0]-1, s[1]-1))
-#                 p = s
-#                 found = True
-#                 break
-#             if not found:
-#                 previous = (i, j)
-#         if found:
-#             break
-#
-#     # If the pixel is isolated i don't do anything
-#     isolated = True
-#     m = moore_neighbor(p)
-#     for r, c in m:
-#         if image[r, c] <= color:
-#             isolated = False
-#
-#     if not isolated:
-#         tmp = c
-#         # Backtrack and next clockwise M(p)
-#         c = next_neighbor(s, previous)
-#         previous = tmp
-#         while c != s:
-#             if image[c] <= color:
-#                 previous_contour = contour_pixels[len(contour_pixels) - 1]
-#
-#                 # contour_pixels.append(c)
-#                 contour_pixels.append((c[0]-1, c[1]-1))
-#                 p = c
-#                 c = previous
-#
-#                 # HERE is where i have to start checking for lines
-#                 # i get the previous contour pixel
-#                 current_contour = p[0] - 1, p[1] - 1
-#
-#                 # i have to calculate t (between 0 and 179) of the line that connects the two pixel
-#                 t = np.arctan2(previous_contour[1]-current_contour[1], previous_contour[0]-current_contour[0]) * 180 / np.pi
-#                 t = int(np.round(t))
-#                 if t < 0:
-#                     t += 180
-#                 t %= 180
-#
-#                 # This is the "classic" Hough in which we consider only a subset of all the possible lines
-#                 for t in range(t-30, t+31):
-#                     if t >= 180:
-#                         t = 180 - t
-#                     if t < 0:
-#                         t = 180 + t
-#                     rad = np.deg2rad(t)
-#
-#                     r = current_contour[0] * np.sin(rad) + current_contour[1] * np.cos(rad) + maxr
-#                     accumulator[int(np.round(r)), t] += 1
-#
-#             else:
-#                 previous = c
-#                 c = next_neighbor(p, c)
-#
-#         image = crop(image, 1, 1, original_height, original_width)
-#     return contour_pixels
-#
-#
-# def moore_neighbor(pixel):
-#     row, col = pixel
-#     return ((row - 1, col - 1), (row - 1, col), (row - 1, col + 1),
-#             (row, col + 1), (row + 1, col + 1),
-#             (row + 1, col), (row + 1, col - 1),
-#             (row, col - 1))
-#
-#
-# def next_neighbor(central, neighbor):
-#     neighbors = moore_neighbor(central)
-#     index = np.where((np.array(neighbors) == neighbor).all(axis=1))[0][0]
-#     index += 1
-#     index = index % 8
-#
-#     # Problem operating like this:
-#     # if the object of which i want to detect contours starts at the edges of the image there's the possibility
-#     # of going out of bounds
-#     return neighbors[index]
-#
-#
-# # Function that "deletes" an object using the information about its contours
-# def delete_object(image, contoured, contours):
-#     # With the edge pixel i also delete its moore neighborhood because otherwise if and edge is 2 pixel thick
-#     # because i find only the external contour i wouldn't delete the contour completely
-#     height, width = image.shape
-#     for x, y in contours:
-#         image[x, y] = 255
-#         image[np.clip(x - 1, 0, height - 1), np.clip(y - 1, 0, width - 1)] = 255
-#         image[np.clip(x - 1, 0, height - 1), y] = 255
-#         image[np.clip(x - 1, 0, height - 1), np.clip(y + 1, 0, width - 1)] = 255
-#         image[x, np.clip(y - 1, 0, width - 1)] = 255
-#         image[x, y] = 255
-#         image[x, np.clip(y + 1, 0, width - 1)] = 255
-#         image[np.clip(x + 1, 0, height - 1), np.clip(y - 1, 0, width - 1)] = 255
-#         image[np.clip(x + 1, 0, height - 1), y] = 255
-#         image[np.clip(x + 1, 0, height - 1), np.clip(y + 1, 0, width - 1)] = 255
-#
-#     return image
-#
-#
-# # INPUT PARAMETER: a binarized image (using Canny edge) in which the contours are black and the background is white
-# # OUTPUT PARAMETER: an image with black background and white contours for all the objects identified and red lines
-# #                   where they are found
-# def main():
-#     if len(sys.argv) > 1:
-#         # Used later to save the image
-#         image_basename = splitext(sys.argv[1])[0]
-#         img_format = splitext(sys.argv[1])[1]
-#
-#         # Load the image
-#         image = cv2.imread(sys.argv[1], 0)
-#         contour_all = np.zeros(image.shape, np.uint8)
-#
-#         height, width = image.shape
-#         # Variables used to perform hough
-#         maxr = int(np.ceil(np.sqrt(np.power(height, 2) + np.power(width, 2))))
-#         accumulator = np.zeros((maxr * 2 + 1, 180), np.uint32)
-#
-#         # I iterate until there are no more edge pixels
-#         # I keep tracing contours updating the accumulator matrix
-#         # delete the contour found and repeat
-#         while np.any(image <= 100):
-#             contoured = np.zeros(image.shape, np.uint8)
-#             contours = moore_neighbor_tracing(image, accumulator, maxr)
-#             for x, y in contours:
-#                 contoured[x, y] = 255
-#                 contour_all[x, y] = 255
-#             delete_object(image, contoured, contours)
-#
-#         cv2.imshow("", contour_all)
-#         cv2.waitKey(0)
-#         cv2.destroyAllWindows()
-#         cv2.imwrite(image_basename + "_contoured" + img_format, contour_all)
-#
-#         # Draw the lines i find in the accumulator matrix
-#         tmp = np.array(contour_all)
-#         print("before merge")
-#         tmp = cv2.merge((tmp, tmp, tmp))
-#         print("after merge")
-#         t = 100
-#         for i, j in np.argwhere(accumulator > t):
-#             print("in loop1,i=",i," ,j=",j)
-#             rad = np.deg2rad(j)
-#             a = np.cos(rad)
-#             b = np.sin(rad)
-#             # This is needed because debugging i saw that a or b could go something like 1e-17 which is 0
-#             # but if i don't set it manually to 0, due to approximation errors i could get that the two points
-#             # of an horizontal line have two y that differs by one unit and so the line is not perfectly horizontal
-#             # (it happened with the sudoku image, for example)
-#             if 0 < a < 1e-10:
-#                 a = 0
-#             if 0 < b < 1e-10:
-#                 b = 0
-#             x0 = a * (i - maxr)
-#             y0 = b * (i - maxr)
-#             x1 = int(x0 + 1000 * (-b))
-#             y1 = int(y0 + 1000 * (a))
-#             x2 = int(x0 - 1000 * (-b))
-#             y2 = int(y0 - 1000 * (a))
-#             cv2.line(tmp, (x1, y1), (x2, y2), (0, 0, 255), thickness=1)
-#
-#         # Post processing: i delete red lines where there is not a white line beneath
-#         height, width = image.shape
-#         for i in range(height):
-#             for j in range(width):
-#                 print("in loop2,i=",i,",j=",j,",height=",height,"width=",width)
-#                 # if a pixel is red i check if it is correct, otherwise i set it to black
-#                 # to check if it is correct i look if under it there are white pixels in the moor neighborhood
-#                 if tmp[i, j, 2] == 255:
-#                     mn = moore_neighbor((i, j))
-#                     mn = np.array(mn)
-#                     rows = np.clip(mn[:, 0], 0, height-1)
-#                     columns = np.clip(mn[:, 1], 0, width-1)
-#                     colored_neighbor = np.any(contour_all[(rows, columns)] >= 200)
-#                     if contour_all[i, j] <= 100 and not colored_neighbor:
-#                         tmp[i, j, 2] = 0
-#
-#         cv2.imshow("", tmp)
-#         cv2.waitKey(0)
-#         cv2.destroyAllWindows()
-#         cv2.imwrite(image_basename + "_houghed2" + img_format, tmp)
-#
-#     else:
-#         print("Not enough input arguments")
-#
-#
-# if __name__ == "__main__":
-#     main()
-
-
-
-# import numpy as np
-# import imageio
-# import math
-#
-# def rgb2gray(rgb):
-#     return np.dot(rgb[..., :3], [0.299, 0.587, 0.114]).astype(np.uint8)
-#
-#
-# def hough_line(img, angle_step=1, lines_are_white=True, value_threshold=5):
-#     """
-#     Hough transform for lines
-#     Input:
-#     img - 2D binary image with nonzeros representing edges
-#     angle_step - Spacing between angles to use every n-th angle
-#                  between -90 and 90 degrees. Default step is 1.
-#     lines_are_white - boolean indicating whether lines to be detected are white
-#     value_threshold - Pixel values above or below the value_threshold are edges
-#     Returns:
-#     accumulator - 2D array of the hough transform accumulator
-#     theta - array of angles used in computation, in radians.
-#     rhos - array of rho values. Max size is 2 times the diagonal
-#            distance of the input image.
-#     """
-#     # Rho and Theta ranges
-#     thetas = np.deg2rad(np.arange(-90.0, 90.0, angle_step))
-#     width, height = img.shape
-#     diag_len = int(round(math.sqrt(width * width + height * height)))
-#     rhos = np.linspace(-diag_len, diag_len, diag_len * 2)
-#
-#     # Cache some resuable values
-#     cos_t = np.cos(thetas)
-#     sin_t = np.sin(thetas)
-#     num_thetas = len(thetas)
-#
-#     # Hough accumulator array of theta vs rho
-#     accumulator = np.zeros((2 * diag_len, num_thetas), dtype=np.uint8)
-#     # (row, col) indexes to edges
-#     are_edges = img > value_threshold if lines_are_white else img < value_threshold
-#     y_idxs, x_idxs = np.nonzero(are_edges)
-#
-#     # Vote in the hough accumulator
-#     for i in range(len(x_idxs)):
-#         x = x_idxs[i]
-#         y = y_idxs[i]
-#
-#         for t_idx in range(num_thetas):
-#             print("i:",i," ,x:",x," ,y:",y," ,t_idx:",t_idx)
-#             # Calculate rho. diag_len is added for a positive index
-#             rho = diag_len + int(round(x * cos_t[t_idx] + y * sin_t[t_idx]))
-#             accumulator[rho, t_idx] += 1
-#
-#     return accumulator, thetas, rhos
-#
-#
-# def show_hough_line(img, accumulator, save_path=None):
-#     import matplotlib.pyplot as plt
-#
-#     fig, ax = plt.subplots(1, 2, figsize=(10, 10))
-#
-#     ax[0].imshow(img, cmap=plt.cm.gray)
-#     ax[0].set_title('Input image')
-#     ax[0].axis('image')
-#
-#     ax[1].imshow(
-#         accumulator, cmap='jet',
-#         extent=[np.rad2deg(thetas[-1]), np.rad2deg(thetas[0]), rhos[-1], rhos[0]])
-#     ax[1].set_aspect('equal', adjustable='box')
-#     ax[1].set_title('Hough transform')
-#     ax[1].set_xlabel('Angles (degrees)')
-#     ax[1].set_ylabel('Distance (pixels)')
-#     ax[1].axis('image')
-#
-#     # plt.axis('off')
-#     if save_path is not None:
-#         plt.savefig(save_path, bbox_inches='tight')
-#     plt.show()
-#
-#
-# if __name__ == '__main__':
-#     imgpath = "./source/hw-seal.jpg"
-#     img = imageio.imread(imgpath)
-#     if img.ndim == 3:
-#         img = rgb2gray(img)
-#     accumulator, thetas, rhos = hough_line(img)
-#     show_hough_line(img, accumulator, save_path="./source/output.jpg")
-
-
-# from scipy import misc
-#
-# import matplotlib.pyplot as plt
-# import numpy as np
-# import math
-# import imageio
-#
-# #----------------------------------------------------------------------------------------#
-# # Step 1: read image
-#
-# img = imageio.imread("./source/hw-seal.jpg")
-#
-# print ('image shape: ', img.shape)
-#
-# plt.imshow(img, )
-#
-# plt.savefig("image.png",bbox_inches='tight')
-#
-# plt.close()
-#
-# #----------------------------------------------------------------------------------------#
-# # Step 2: Hough Space
-#
-# img_shape = img.shape
-#
-# x_max = img_shape[0]
-# y_max = img_shape[1]
-#
-# theta_max = 1.0 * math.pi
-# theta_min = 0.0
-#
-# r_min = 0.0
-# r_max = math.hypot(x_max, y_max)
-#
-# r_dim = 200
-# theta_dim = 300
-#
-# hough_space = np.zeros((r_dim,theta_dim))
-#
-# for x in range(x_max):
-#     for y in range(y_max):
-#         if img[x,y,0] == 255: continue
-#         for itheta in range(theta_dim):
-#             print("X:",x," Y:",y," itheta:",itheta)
-#             theta = 1.0 * itheta * theta_max / theta_dim
-#             r = x * math.cos(theta) + y * math.sin(theta)
-#             ir = int(r_dim * ( 1.0 * r ) / r_max)
-#             hough_space[ir,itheta] = hough_space[ir,itheta] + 1
-#
-# plt.imshow(hough_space, origin='lower')
-# plt.xlim(0,theta_dim)
-# plt.ylim(0,r_dim)
-#
-# tick_locs = [i for i in range(0,theta_dim,40)]
-# tick_lbls = [round( (1.0 * i * theta_max) / theta_dim,1) for i in range(0,theta_dim,40)]
-# plt.xticks(tick_locs, tick_lbls)
-#
-# tick_locs = [i for i in range(0,r_dim,20)]
-# tick_lbls = [round( (1.0 * i * r_max ) / r_dim,1) for i in range(0,r_dim,20)]
-# plt.yticks(tick_locs, tick_lbls)
-#
-# plt.xlabel(r'Theta')
-# plt.ylabel(r'r')
-# plt.title('Hough Space')
-#
-# plt.savefig("hough_space_r_theta.png",bbox_inches='tight')
-#
-# plt.close()
-#
-# #----------------------------------------------------------------------------------------#
-# # Find maximas 1
-# '''
-# Sorted_Index_HoughTransform =  np.argsort(hough_space, axis=None)
-#
-# print 'Sorted_Index_HoughTransform[0]', Sorted_Index_HoughTransform[0]
-# #print Sorted_Index_HoughTransform.shape, r_dim * theta_dim
-#
-# shape = Sorted_Index_HoughTransform.shape
-#
-# k = shape[0] - 1
-# list_r = []
-# list_theta = []
-# for d in range(5):
-#     i = int( Sorted_Index_HoughTransform[k] / theta_dim )
-#     #print i, round( (1.0 * i * r_max ) / r_dim,1)
-#     list_r.append(round( (1.0 * i * r_max ) / r_dim,1))
-#     j = Sorted_Index_HoughTransform[k] - theta_dim * i
-#     print 'Maxima', d+1, 'r: ', j, 'theta', round( (1.0 * j * theta_max) / theta_dim,1)
-#     list_theta.append(round( (1.0 * j * theta_max) / theta_dim,1))
-#     print "--------------------"
-#     k = k - 1
-#
-#
-# #theta = list_theta[7]
-# #r = list_r[7]
-#
-# #print " r,theta",r,theta, math.degrees(theta)
-# '''
-# #----------------------------------------------------------------------------------------#
-# # Step 3: Find maximas 2
-#
-# import scipy.ndimage.filters as filters
-# import scipy.ndimage as ndimage
-#
-# neighborhood_size = 20
-# threshold = 140
-#
-# data_max = filters.maximum_filter(hough_space, neighborhood_size)
-# maxima = (hough_space == data_max)
-#
-#
-# data_min = filters.minimum_filter(hough_space, neighborhood_size)
-# diff = ((data_max - data_min) > threshold)
-# maxima[diff == 0] = 0
-#
-# labeled, num_objects = ndimage.label(maxima)
-# slices = ndimage.find_objects(labeled)
-#
-# x, y = [], []
-# for dy,dx in slices:
-#     x_center = (dx.start + dx.stop - 1)/2
-#     x.append(x_center)
-#     y_center = (dy.start + dy.stop - 1)/2
-#     y.append(y_center)
-#
-# print (x)
-# print (y)
-#
-# plt.imshow(hough_space, origin='lower')
-# plt.savefig('hough_space_i_j.png', bbox_inches = 'tight')
-#
-# plt.autoscale(False)
-# plt.plot(x,y, 'ro')
-# plt.savefig('hough_space_maximas.png', bbox_inches = 'tight')
-#
-# plt.close()
-#
-# #----------------------------------------------------------------------------------------#
-# # Step 4: Plot lines
-#
-# line_index = 1
-#
-# for i,j in zip(y, x):
-#
-#     r = round( (1.0 * i * r_max ) / r_dim,1)
-#     theta = round( (1.0 * j * theta_max) / theta_dim,1)
-#
-#     fig, ax = plt.subplots()
-#
-#     ax.imshow(img)
-#
-#     ax.autoscale(False)
-#
-#     px = []
-#     py = []
-#     for i in range(-y_max-40,y_max+40,1):
-#         px.append( math.cos(-theta) * i - math.sin(-theta) * r )
-#         py.append( math.sin(-theta) * i + math.cos(-theta) * r )
-#
-#     ax.plot(px,py, linewidth=10)
-#
-#     plt.savefig("image_line_"+ "%02d" % line_index +".png",bbox_inches='tight')
-#
-#     #plt.show()
-#
-#     plt.close()
-#
-#     line_index = line_index + 1
-#
-# #----------------------------------------------------------------------------------------#
-# # Plot lines
-# '''
-# i = 11
-# j = 264
-#
-# i = y[1]
-# j = x[1]
-#
-# print i,j
-#
-# r = round( (1.0 * i * r_max ) / r_dim,1)
-# theta = round( (1.0 * j * theta_max) / theta_dim,1)
-#
-# print 'r', r
-# print 'theta', theta
-#
-#
-# fig, ax = plt.subplots()
-#
-# ax.imshow(img)
-#
-# ax.autoscale(False)
-#
-# px = []
-# py = []
-# for i in range(-y_max-40,y_max+40,1):
-#     px.append( math.cos(-theta) * i - math.sin(-theta) * r )
-#     py.append( math.sin(-theta) * i + math.cos(-theta) * r )
-#
-# print px
-# print py
-#
-# ax.plot(px,py, linewidth=10)
-#
-# plt.savefig("PlottedLine_07.png",bbox_inches='tight')
-#
-# #plt.show()
-#
-# '''
+if __name__ == '__main__':
+    print("Please Input the name of the image which will be detected soon. For example, you can just input 'hw-coin.jpg' to detect this picture. Note: the picture which is going to be detected should be stored in the folder './source', and the pictrue which is processed will be saved in the folder './Output'. Wish you enjoy this program!")
+    pictureName=input()
+    img_gray = cv2.imread(Path+pictureName, cv2.IMREAD_GRAYSCALE)       # Read in grayscale image information
+    img_RGB = cv2.imread(Path+pictureName)      # Read in colorful image information
+    y, x = img_gray.shape[0:2]      # Import image size information
+    print('[IN Canny Algorithm]')
+    canny = Canny(Guassian_kernal_size, img_gray, HT_high_threshold, HT_low_threshold)  # Initialize the Canny class
+    canny.canny_algorithm()     # Use Canny class functions for edge detection
+    cv2.imwrite(Save_Path + pictureName + "_canny.jpg", canny.img)
+    print('[IN Hough Transform Circle Detect Algorithm]')
+    HoughCircle = Hough_Circle_Transform(canny.img, canny.angle, Hough_transform_step, Hough_transform_threshold)   # Initialize the Hough_Circle_Transform class
+    circles = HoughCircle.Calculate()       # Use Hough_Circle_Transform class functions for Circle detection
+    for circle in circles:      # Draw information about all circles
+        cv2.circle(img_RGB, (math.ceil(circle[0]), math.ceil(circle[1])), math.ceil(circle[2]), (28, 36, 237), 2)
+    cv2.imwrite(Save_Path + pictureName +"_hough_circle_result.jpg", img_RGB)
+    print('[IN Hough Transform Line Detect Algorithm]')
+    # cv2.imshow("result", canny.img)
+    # HoughLine = Hough_Line_Transform(canny.img, img_RGB)
+    HoughLine = Hough_Line_Transform(cv2.Canny(cv2.GaussianBlur(img_RGB,(23,23),0),75,150), img_RGB)       # Initialize the Hough_Line_Transform class
+    HoughLineDetected=HoughLine.Calculate()       # Use Hough_Line_Transform class functions for Line detection
+    cv2.imwrite(Save_Path + pictureName + "_hough_line_result.jpg", HoughLineDetected)
+    print("[Contour/Line Extraction Finished! The Pictures after processed have been saved in the './Output' folder, Please Check it now! ]")
