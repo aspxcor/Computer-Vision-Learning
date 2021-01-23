@@ -1,6 +1,8 @@
 # Computer-Vision-Learning
 Some Projects About Computer Vision to Help us Learn Computer Vision Better
 
+Hw1~Hw3 are the homework iin the ZJU Computer Vision class. To be continued...
+
 ## Homework 1. Make a silent short video by using OpenCV
 ### Program description
 
